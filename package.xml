@@ -5,9 +5,9 @@
   <version>0.2.0</version>
   <description>
     ROBOCON 场地四全向轮小车仿真（560x560 mm 车体 = 规则启动区 700x700 的 80%，
-    200 mm 全向轮）。本包只保留一条仿真链路：
+    200 mm 全向轮）
       physics 轮速驱动 + Mid-360 雷达/IMU -> FAST-LIO 建图 -> 存先验图 -> 先验图导航（含持续重定位）+ 键盘遥控。
-    真机侧脚本在仓库 real/ 目录下（不依赖本包）。
+
   </description>
   <maintainer email="zx@example.com">zx</maintainer>
   <license>MIT</license>
