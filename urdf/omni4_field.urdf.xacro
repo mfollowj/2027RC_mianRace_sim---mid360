@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<!--
+  ============================================================================
+  机器人总装（omni4_field）：560 x 560 mm 四全向轮小车，physics 驱动
+  ============================================================================
+  尺寸/轮系/驱动方式等设计依据见 urdf/omni4_body.xacro 头部注释。
+
+  坐标系：
+      odom  =(FAST-LIO)=>  base_link  =(固定关节)=>  livox_frame / imu_link
+      base_link 原点在"地面接触面"（z=0 即地面），Nav2/代价地图统一用 base_link。
+
+  导出检查：
+      xacro omni4_field.urdf.xacro lidar_sensor_xacro:=lidar_livox_mid360.xacro > /tmp/r.urdf
+      check_urdf /tmp/r.urdf
+  ============================================================================
+-->
+<robot name="omni4_field" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- 雷达后端文件（launch 传绝对路径；本项目只用 Livox Mid-360） -->
+  <xacro:arg name="lidar_sensor_xacro" default="lidar_livox_mid360.xacro"/>
+  <xacro:arg name="lidar_topic" default="/livox/lidar"/>
+  <xacro:arg name="lidar_mount_z" default="0.36"/>
+  <xacro:arg name="imu_mount_z" default="0.30"/>
+  <!-- Livox 插件每帧消费的 CSV 行数：mid360.csv 一个完整扫描花样是 20000 行
+       （俯仰 -7.2°~+52.2° 全覆盖）。小于 20000 会让一帧只覆盖花样的一部分，
+       实测 samples=4000 时每 5 帧就有 2 帧一个有效回波都没有。 -->
+  <xacro:arg name="lidar_samples" default="20000"/>
+  <xacro:arg name="lidar_downsample" default="4"/>
+  <!-- 用 FAST-LIO 时 odom->base_link 由 LIO 广播，插件里程计改名 /odom_gz -->
+  <xacro:arg name="publish_odom_tf" default="false"/>
+  <xacro:arg name="odom_topic" default="odom_gz"/>
+  <xacro:arg name="controllers_yaml" default=""/>
+
+  <xacro:include filename="omni4_body.xacro"/>
+  <xacro:include filename="$(arg lidar_sensor_xacro)"/>
+
+  <xacro:omni4_chassis/>
+  <xacro:omni4_wheels/>
+  <xacro:omni4_imu mount_z="$(arg imu_mount_z)"/>
+  <xacro:omni4_drive publish_odom_tf="$(arg publish_odom_tf)"
+                     odom_topic="$(arg odom_topic)"
+                     controllers_yaml="$(arg controllers_yaml)"/>
+
+  <xacro:omni4_lidar parent="base_link"
+                     topic="$(arg lidar_topic)"
+                     mount_z="$(arg lidar_mount_z)"
+                     samples="$(arg lidar_samples)"
+                     downsample="$(arg lidar_downsample)"/>
+
+</robot>

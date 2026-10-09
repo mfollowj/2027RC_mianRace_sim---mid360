@@ -1,0 +1,30 @@
+# 3D 点云 -> 2D 激光扫描（给 slam_toolbox / Nav2 costmap / AMCL 用）
+#
+# 高度滤波是本文件最关键的参数：
+#   * 基准坐标系是 base_link，而 base_link 原点在"地面接触面"(z=0)，
+#     所以 min_height/max_height 的数值就是"离地高度"。
+#   * 场地真实围栏只有 80mm 高，本场地模型里额外加了 0.6m 高的
+#     "导航边墙"(collision_nav_wall_*)，因此 min_height=0.10 会
+#     ① 滤掉地面点(z=0)与 80mm 围栏顶，避免地面被当成障碍；
+#     ② 保留 0.6m 边墙、L1/L2 侧壁、五色石基座、L1 围边。
+#   * 坡道/台阶(最高 0.6m)会有一部分点落在带内，因此在地面层导航时
+#     它们会显示为"障碍"——这是 2D 代价地图的固有限制，符合预期。
+#
+# 调参提示：若发现 /scan 里出现一圈近处的"地面环"，把 min_height 调大；
+#           若地图边界出现缺口，检查 max_height 是否过低。
+/pointcloud_to_laserscan:
+  ros__parameters:
+    target_frame: base_link
+    transform_tolerance: 0.05
+
+    min_height: 0.10
+    max_height: 0.80
+
+    angle_min: -3.14159
+    angle_max: 3.14159
+    angle_increment: 0.0087      # ≈0.5°，一圈约 723 个 bin
+    scan_time: 0.1               # 与 10Hz 雷达一致
+    range_min: 0.45              # > 车体半对角线 0.378 m，避免打到自身
+    range_max: 25.0
+    use_inf: true
+    inf_epsilon: 1.0

@@ -1,0 +1,25 @@
+# gazebo_ros2_control 控制器配置：4 个全向轮的速度控制
+#
+# 配合 drive_mode:=physics 使用：
+#   * joint_state_broadcaster        —— 发布 /joint_states（轮子转速/位置）
+#   * wheel_velocity_controller      —— 订阅 /wheel_velocity_controller/commands
+#                                       (std_msgs/Float64MultiArray，4 个轮速)
+#   * scripts/omni_drive.py          —— 把 /cmd_vel 按全向轮逆解变成 4 个轮速，
+#                                       并用轮速正解积分出 odom
+controller_manager:
+  ros__parameters:
+    use_sim_time: true
+    update_rate: 100                      # 控制频率 Hz
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    wheel_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+wheel_velocity_controller:
+  ros__parameters:
+    joints:
+      - base_to_wheel1
+      - base_to_wheel2
+      - base_to_wheel3
+      - base_to_wheel4
+    interface_name: velocity

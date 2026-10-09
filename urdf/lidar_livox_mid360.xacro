@@ -1,0 +1,120 @@
+<?xml version="1.0"?>
+<!--
+  ============================================================================
+  Mid-360 激光雷达（Livox 非重复扫描）—— 复用你们已有的仿真插件
+  ============================================================================
+  依赖（必须先 source 你们的工程）：
+      source /home/zx/SCURC_Nav_Sim/install/setup.bash
+  提供：
+      * 插件 libros2_livox.so       (包 ros2_livox_simulation)
+      * 扫描花样 scan_mode/mid360.csv (800001 行真实 Mid-360 扫描图案)
+      * 自定义消息 livox_ros_driver2/msg/CustomMsg
+  因此本文件不适合"零依赖"场景；没有该工作空间时请用 lidar_stock_3d.xacro
+  后端（launch 的 lidar_backend:=auto/stock 会自动判断）。
+
+  话题约定（与真实机器人完全一致）：
+      /livox/lidar            livox_ros_driver2/CustomMsg  （真实驱动同名话题，
+                              可直接喂给 FAST-LIO2 / FAST-LIVO2）
+      /livox/lidar/pointcloud sensor_msgs/PointCloud2      （给 pointcloud_to_laserscan）
+
+  参考了 pangolin_simulation/urdf/simulation_waking_robot.xacro 与
+  ros2_livox_simulation/urdf/mid360.xacro 的可用配置（always_on=true、
+  visualize=false、sensor 名即 frame_id），此处改为自建 link，避免额外依赖
+  pangolin_simulation 的 mid360.stl 网格。
+  ============================================================================
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro name="omni4_lidar"
+               params="parent:='base_link' topic:='/livox/lidar' mount_z:=0.50
+                       scan_csv:='' samples:=4000 downsample:=4 range_max:=40.0
+                       horizontal_samples:=100 vertical_samples:=360">
+
+    <link name="livox_frame">
+      <visual>
+        <geometry>
+          <cylinder radius="0.05" length="0.062"/>
+        </geometry>
+        <material name="omni_dark">
+          <color rgba="0.25 0.25 0.28 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <cylinder radius="0.05" length="0.062"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.265"/>
+        <inertia ixx="3.5e-4" ixy="0" ixz="0" iyy="3.5e-4" iyz="0" izz="3.3e-4"/>
+      </inertial>
+    </link>
+
+    <joint name="base_to_livox" type="fixed">
+      <parent link="${parent}"/>
+      <child link="livox_frame"/>
+      <origin xyz="0 0 ${mount_z}" rpy="0 0 0"/>
+    </joint>
+
+    <gazebo reference="livox_frame">
+      <material>Gazebo/DarkGrey</material>
+      <sensor type="ray" name="livox_frame">
+        <pose>0 0 0 0 0 0</pose>
+        <!-- always_on 必须为 true：插件靠 OnNewLaserScans() 回调取数据，
+             关闭时若无订阅者则传感器不更新，表现为点云一帧都没有。 -->
+        <always_on>true</always_on>
+        <!-- gzserver 内没有 OGRE 渲染场景时，sensor 级 visualize=true 会让
+             射线传感器无法更新，故关闭（只影响 GUI 里是否画射线）。 -->
+        <visualize>false</visualize>
+        <update_rate>10</update_rate>
+
+        <plugin name="livox_frame_plugin" filename="libros2_livox.so">
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>${horizontal_samples}</samples>
+                <resolution>1</resolution>
+                <min_angle>0</min_angle>
+                <max_angle>${2*3.14159265358979}</max_angle>
+              </horizontal>
+              <!-- Mid-360 实测垂直视场：-7.22° ~ +55.22° -->
+              <vertical>
+                <samples>${vertical_samples}</samples>
+                <resolution>1</resolution>
+                <min_angle>${-7.22/180*3.14159265358979}</min_angle>
+                <max_angle>${55.22/180*3.14159265358979}</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.10</min>
+              <max>${range_max}</max>
+              <resolution>0.01</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0.0</mean>
+              <stddev>0.002</stddev>
+            </noise>
+          </ray>
+          <visualize>false</visualize>
+          <!-- 每帧按 mid360.csv 采集的射线数 / 抽稀倍数。
+               ★ 这两个值直接决定 CPU：插件的多射线形状每帧要做 <samples> 次射线检测，
+                 10000 条 @10Hz = 10 万次/秒，很容易把 gzserver 压到实时率崩掉、
+                 表现为"Gazebo 卡住没反应"。默认改为 4000/4：
+                 每帧点数仍是 1000（4000/4），但射线检测少 60%。
+                 需要更密的点云再往上调，代价是 CPU。 -->
+          <samples>${samples}</samples>
+          <downsample>${downsample}</downsample>
+          <xacro:if value="${scan_csv == ''}">
+            <csv_file_name>$(find ros2_livox_simulation)/scan_mode/mid360.csv</csv_file_name>
+          </xacro:if>
+          <xacro:if value="${scan_csv != ''}">
+            <csv_file_name>${scan_csv}</csv_file_name>
+          </xacro:if>
+          <topic>${topic}</topic>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+</robot>

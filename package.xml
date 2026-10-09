@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>rc_field_nav</name>
+  <version>0.2.0</version>
+  <description>
+    ROBOCON 场地四全向轮小车仿真（560x560 mm 车体 = 规则启动区 700x700 的 80%，
+    200 mm 全向轮）。本包只保留一条仿真链路：
+      physics 轮速驱动 + Mid-360 雷达/IMU -> FAST-LIO 建图 -> 存先验图 -> 先验图导航（含持续重定位）+ 键盘遥控。
+    真机侧脚本在仓库 real/ 目录下（不依赖本包）。
+  </description>
+  <maintainer email="zx@example.com">zx</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- 仿真：Gazebo + 轮速控制（physics 驱动） -->
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>gazebo_plugins</exec_depend>
+  <exec_depend>gazebo_ros2_control</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+
+  <!-- 话题/感知 -->
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>sensor_msgs_py</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>pointcloud_to_laserscan</exec_depend>
+
+  <!-- 建图（3D）：FAST-LIO2，来自 SCURC_Nav_Sim 工作空间 -->
+  <exec_depend>fast_lio</exec_depend>
+
+  <!-- 导航：Nav2（不用 AMCL，map->odom 由 prior_map_localizer.py 给） -->
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>nav2_mppi_controller</exec_depend>
+  <exec_depend>nav2_smac_planner</exec_depend>
+  <exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_planner</exec_depend>
+  <exec_depend>nav2_behaviors</exec_depend>
+  <exec_depend>nav2_bt_navigator</exec_depend>
+  <exec_depend>nav2_velocity_smoother</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+
+  <!-- Livox Mid-360 仿真后端（来自 SCURC_Nav_Sim 工作空间） -->
+  <exec_depend>ros2_livox_simulation</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

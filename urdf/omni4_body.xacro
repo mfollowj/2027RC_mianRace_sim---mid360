@@ -1,0 +1,301 @@
+<?xml version="1.0"?>
+<!--
+  ============================================================================
+  四全向轮小车 —— 车体 / 轮系 / IMU / 驱动（本项目唯一在用的机器人模型）
+  ============================================================================
+  ■ 尺寸依据：ROBOCON 规则 3.3.1（启动区 700 mm × 700 mm，比赛开始时车必须
+    完全纳入启动区）→ 规则允许的最大外廓 700 × 700 mm。
+    本车取 **80%：560 × 560 mm**（四向各留 70 mm 余量）：
+        * 车体 0.56 × 0.56 × 0.18 m；轮子完全收在车体投影内
+          （轮心 ±0.20 m、轮半径 0.10 m，水平外缘 = 0.20 + 0.10·sin45° = 0.2707 m
+            → 整车水平外廓 541 mm < 560 mm）
+        * 因此整车外廓就是 560 × 560 mm，不会有轮子支出车体
+  ■ 轮系（ROBOCON 常规比例）：4 个 **200 mm** 直径全向轮（90° 滚子），
+    轮径 = 车体边长的 36%，轮宽 60 mm，X 型布局、轮轴沿径向：
+        φ_i = atan2(±0.20, ±0.20) = ±45° / 180°∓45°
+        r   = hypot(0.20, 0.20) = 0.2828 m
+        t_i = (-sin φ_i, cos φ_i)
+    逆运动学（cmd_vel → 轮速）：v_i = -sin(φ_i)·vx + cos(φ_i)·vy + ω·r，ω_i = v_i / R
+  ■ 质量：车体 15 kg + 4 × 0.8 kg 轮 = 18.2 kg（规则 11.7：两台含电池 ≤ 50 kg）
+  ■ 传感器安装高度：IMU 0.30 m、雷达 0.36 m（相差 6 cm，与 FAST-LIO 的
+    extrin_calib.extrinsic_T = [0, 0, 0.06] 对应；改这里必须同步改 LIO 配置）
+  ■ 驱动：**只有 physics 一种**（gazebo_ros2_control 速度控制 4 个轮关节 +
+    scripts/omni_drive.py 做 /cmd_vel→轮速与轮速→odom）。
+    已删除 planar_move 运动学驱动：它会每步把 z 速度强制为 0，导致
+      * 从高台边缘开出去时悬空平飞（实测 0.02 m/s 缓慢下沉 + 水平 0.4 m/s 前进），
+      * 坡道/台阶完全无效、还会推穿薄墙。
+  ■ 通过能力（物理决定的硬上限，别指望它爬台阶）：
+      * 刚性轮爬台阶上限约等于轮半径 → 本车 R = 0.10 m，现实上限 80~100 mm；
+      * 场地台阶每级 150 mm = 1.5·R，理论上需要附着系数 > 1.7，**仍然上不去**，
+        只能走 **9.7° 坡道**（所需 μ > tan9.7° = 0.17，本车 μ=1.5 富余）；
+      * 轮子加大后的好处：离地间隙 = R = 100 mm > 场地 80 mm 围栏/中央分隔带，
+        可以直接骑过去；同样速度下轮子转速更低、更不易打滑，爬坡更稳。
+  ============================================================================
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- ==================== 尺寸 / 质量参数 ==================== -->
+  <xacro:property name="PI" value="3.14159265358979"/>
+  <!-- 轮系：200 mm 全向轮（R = 0.10 m），X 型 45° 布局
+       ★ 改 R 必须同步改 launch/sim.launch.py 里 omni_drive 的 wheel_radius：
+         轮速指令与轮速里程计都按 R 折算，不一致会"跑得比指令快/慢"。 -->
+  <xacro:property name="wheel_radius" value="0.10"/>
+  <xacro:property name="wheel_width" value="0.06"/>
+  <xacro:property name="wheel_x" value="0.20"/>
+  <xacro:property name="wheel_y" value="0.20"/>
+  <xacro:property name="wheel_mass" value="0.8"/>
+  <xacro:property name="wheel_r_center" value="${sqrt(wheel_x*wheel_x + wheel_y*wheel_y)}"/>
+  <xacro:property name="phi1" value="${ atan2( wheel_y,  wheel_x)}"/>
+  <xacro:property name="phi2" value="${ atan2( wheel_y, -wheel_x)}"/>
+  <xacro:property name="phi3" value="${ atan2(-wheel_y, -wheel_x)}"/>
+  <xacro:property name="phi4" value="${ atan2(-wheel_y,  wheel_x)}"/>
+
+  <!-- 车体：560 x 560 x 180 mm（= 规则上限 700 的 80%），底面正好坐在轮顶 -->
+  <xacro:property name="body_xy" value="0.56"/>
+  <xacro:property name="body_z" value="0.18"/>
+  <xacro:property name="body_bottom" value="${wheel_radius}"/>
+  <xacro:property name="body_mass" value="15.0"/>
+  <xacro:property name="imu_default_z" value="0.30"/>
+  <xacro:property name="lidar_default_z" value="0.36"/>
+
+  <xacro:macro name="box_inertia" params="m x y z">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia ixx="${m*(y*y+z*z)/12.0}" ixy="0.0" ixz="0.0"
+               iyy="${m*(x*x+z*z)/12.0}" iyz="0.0"
+               izz="${m*(x*x+y*y)/12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="cylinder_inertia" params="m r l">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia ixx="${m*(3.0*r*r+l*l)/12.0}" ixy="0.0" ixz="0.0"
+               iyy="${m*(3.0*r*r+l*l)/12.0}" iyz="0.0"
+               izz="${m*r*r/2.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- ==================== 车体 ==================== -->
+  <xacro:macro name="omni4_chassis">
+    <link name="base_link">
+      <visual>
+        <origin xyz="0 0 ${body_bottom + body_z/2.0}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${body_xy} ${body_xy} ${body_z}"/>
+        </geometry>
+        <material name="omni_blue">
+          <color rgba="0.15 0.35 0.75 1.0"/>
+        </material>
+      </visual>
+      <!-- 顶板（视觉上区分承载面） -->
+      <visual name="deck">
+        <origin xyz="0 0 ${body_bottom + body_z + 0.01}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${body_xy*0.8} ${body_xy*0.8} 0.02"/>
+        </geometry>
+        <material name="omni_deck">
+          <color rgba="0.85 0.85 0.88 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${body_bottom + body_z/2.0}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${body_xy} ${body_xy} ${body_z}"/>
+        </geometry>
+      </collision>
+      <xacro:box_inertia m="${body_mass}" x="${body_xy}" y="${body_xy}" z="${body_z}"/>
+    </link>
+  </xacro:macro>
+
+  <!-- ==================== 四个全向轮（200 mm，X 型 45°） ==================== -->
+  <xacro:macro name="omni4_wheel" params="index corner_x corner_y phi">
+    <link name="wheel_${index}">
+      <!-- 视觉：滚子网格本来就是按 R = 100 mm 建模的，200 mm 轮径正好 1:1 -->
+      <visual>
+        <geometry>
+          <mesh filename="package://rc_field_nav/meshes/omni_wheel_R100.obj"
+                scale="1.0 1.0 1.0"/>
+        </geometry>
+        <material name="omni_black">
+          <color rgba="0.12 0.12 0.12 1.0"/>
+        </material>
+      </visual>
+      <visual name="hub_marker">
+        <geometry>
+          <cylinder radius="${wheel_radius*0.8}" length="${wheel_width*0.9}"/>
+        </geometry>
+        <material name="omni_hub">
+          <color rgba="0.35 0.35 0.4 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+      </collision>
+      <xacro:cylinder_inertia m="${wheel_mass}" r="${wheel_radius}" l="${wheel_width}"/>
+    </link>
+    <!-- rpy = (-90°, 0, φ+90°)：圆柱轴(局部 z)先转水平，再绕 z 转到该轮径向 -->
+    <joint name="base_to_wheel${index}" type="continuous">
+      <parent link="base_link"/>
+      <child link="wheel_${index}"/>
+      <origin xyz="${corner_x} ${corner_y} ${wheel_radius}"
+              rpy="${-PI/2} 0 ${phi + PI/2}"/>
+      <axis xyz="0 0 1"/>
+      <dynamics damping="0.02" friction="0.01"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="omni4_wheels">
+    <xacro:omni4_wheel index="1" corner_x="${ wheel_x}" corner_y="${ wheel_y}" phi="${phi1}"/>
+    <xacro:omni4_wheel index="2" corner_x="${-wheel_x}" corner_y="${ wheel_y}" phi="${phi2}"/>
+    <xacro:omni4_wheel index="3" corner_x="${-wheel_x}" corner_y="${-wheel_y}" phi="${phi3}"/>
+    <xacro:omni4_wheel index="4" corner_x="${ wheel_x}" corner_y="${-wheel_y}" phi="${phi4}"/>
+  </xacro:macro>
+
+  <!-- ==================== IMU ==================== -->
+  <xacro:macro name="omni4_imu" params="mount_z:=${imu_default_z}">
+    <link name="imu_link">
+      <visual>
+        <geometry>
+          <box size="0.05 0.05 0.02"/>
+        </geometry>
+        <material name="omni_green">
+          <color rgba="0.0 0.8 0.2 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <box size="0.05 0.05 0.02"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.05"/>
+        <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+      </inertial>
+    </link>
+    <joint name="base_to_imu" type="fixed">
+      <parent link="base_link"/>
+      <child link="imu_link"/>
+      <origin xyz="0 0 ${mount_z}" rpy="0 0 0"/>
+    </joint>
+
+    <gazebo reference="imu_link">
+      <sensor name="imu_sensor" type="imu">
+        <always_on>true</always_on>
+        <!-- 200 Hz：与真实 Mid-360 内置 IMU 一致，LIO 预积分需要密数据 -->
+        <update_rate>200</update_rate>
+        <visualize>false</visualize>
+        <imu>
+          <angular_velocity>
+            <x><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></x>
+            <y><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></y>
+            <z><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise type="gaussian"><mean>0.0</mean><stddev>2e-3</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></x>
+            <y><noise type="gaussian"><mean>0.0</mean><stddev>2e-3</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></y>
+            <z><noise type="gaussian"><mean>0.0</mean><stddev>2e-3</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></z>
+          </linear_acceleration>
+        </imu>
+        <plugin name="imu_plugin" filename="libgazebo_ros_imu_sensor.so">
+          <ros>
+            <remapping>~/out:=/livox/imu</remapping>
+          </ros>
+          <frame_name>imu_link</frame_name>
+          <initial_orientation_as_reference>false</initial_orientation_as_reference>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ==================== 驱动：physics（唯一） ==================== -->
+  <xacro:macro name="omni4_drive" params="publish_odom_tf:=true
+                                          odom_topic:=odom
+                                          controllers_yaml:=''">
+    <!-- 4 个轮关节的速度接口交给 gazebo_ros2_control；
+         车体运动完全由"轮子转速 + 轮地摩擦"涌现，没有插件直接设定车体速度。 -->
+    <ros2_control name="Omni4System" type="system">
+      <hardware>
+        <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+      </hardware>
+      <joint name="base_to_wheel1">
+        <command_interface name="velocity"/>
+        <state_interface name="velocity"/>
+        <state_interface name="position"/>
+      </joint>
+      <joint name="base_to_wheel2">
+        <command_interface name="velocity"/>
+        <state_interface name="velocity"/>
+        <state_interface name="position"/>
+      </joint>
+      <joint name="base_to_wheel3">
+        <command_interface name="velocity"/>
+        <state_interface name="velocity"/>
+        <state_interface name="position"/>
+      </joint>
+      <joint name="base_to_wheel4">
+        <command_interface name="velocity"/>
+        <state_interface name="velocity"/>
+        <state_interface name="position"/>
+      </joint>
+    </ros2_control>
+
+    <gazebo>
+      <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
+        <parameters>${controllers_yaml}</parameters>
+      </plugin>
+      <!-- 轮子转速/位置，robot_state_publisher 与 omni_drive 都要用 -->
+      <plugin name="omni4_joint_state" filename="libgazebo_ros_joint_state_publisher.so">
+        <ros>
+          <remapping>~/out:=joint_states</remapping>
+        </ros>
+        <update_rate>50</update_rate>
+        <joint_name>base_to_wheel1</joint_name>
+        <joint_name>base_to_wheel2</joint_name>
+        <joint_name>base_to_wheel3</joint_name>
+        <joint_name>base_to_wheel4</joint_name>
+      </plugin>
+    </gazebo>
+
+    <!-- 接触参数（physics 下真正起作用）
+         * kp/kd：Gazebo 默认 kp=1e12/kd=1 太硬，17 kg 的车从高台落下会弹；
+           改成软一点 + 带阻尼后落地干脆、不弹不炸。
+         * max_vel：允许的穿透修正速度上限（默认 0.01 太小，深穿透要很久才修正）。
+         * mu1/mu2/fdir1：全向轮定向摩擦（见 omni_wheel_surface 注释）。 -->
+    <gazebo reference="base_link">
+      <material>Gazebo/Blue</material>
+      <mu1>0.5</mu1>
+      <mu2>0.5</mu2>
+      <kp>1.0e7</kp>
+      <kd>1.0e3</kd>
+      <min_depth>0.001</min_depth>
+      <max_vel>0.1</max_vel>
+    </gazebo>
+
+    <!-- 全向轮定向摩擦：轮 link 局部坐标里
+             local +x = 滚动方向（驱动方向）
+             local +z = 轮轴方向（径向，滚子自由滑动方向）
+         ODE 的 <fdir1> 是 mu 的方向、其垂直方向用 mu2，因此
+             fdir1 = (0,0,1)（轮轴/滚子方向）→ mu1 要**低**（0.05），否则横移发涩
+             垂直方向（驱动方向）→ mu2 要**高**（1.5），否则驱动打滑 -->
+    <xacro:macro name="omni_wheel_surface" params="index">
+      <gazebo reference="wheel_${index}">
+        <material>Gazebo/Black</material>
+        <mu1>0.05</mu1>
+        <mu2>1.5</mu2>
+        <fdir1>0 0 1</fdir1>
+        <kp>1.0e7</kp>
+        <kd>1.0e3</kd>
+        <min_depth>0.001</min_depth>
+        <max_vel>0.1</max_vel>
+      </gazebo>
+    </xacro:macro>
+    <xacro:omni_wheel_surface index="1"/>
+    <xacro:omni_wheel_surface index="2"/>
+    <xacro:omni_wheel_surface index="3"/>
+    <xacro:omni_wheel_surface index="4"/>
+  </xacro:macro>
+
+</robot>

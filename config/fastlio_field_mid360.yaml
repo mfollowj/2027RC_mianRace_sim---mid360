@@ -1,0 +1,92 @@
+# ============================================================================
+#  FAST-LIO2 配置：ROBOCON 场地 + 本仿真车（omni4_field）
+# ============================================================================
+#  来源：在 SCURC_Nav_Sim 的 fast_lio/config/sim_mid360.yaml 基础上，按本车几何改外参，
+#  并按"仿真里 3D 建图"的需求调参。下面每一条非默认值都写清了理由。
+#
+#  本车几何（urdf/omni4_body.xacro）：
+#      base_link -> imu_link    = (0, 0, 0.44)
+#      base_link -> livox_frame = (0, 0, 0.50)
+#  所以 LiDAR 在 IMU 坐标系下的位置 = (0, 0, +0.06)  ← 这就是 extrinsic_T。
+#  两者姿态一致（同一 mounting，无旋转），extrinsic_R = 单位阵。
+#  仿真里外参精确已知，故 extrinsic_est_en 关闭（更稳、收敛更快）。
+#
+#  话题与仿真发布完全一致：/livox/lidar(livox_ros_driver2/CustomMsg) + /livox/imu
+#
+#  ============================================================================
+#  ★ 2026-09 实测调参记录（这三件事决定了"能不能建出正确的图"）
+#  ============================================================================
+#  1) 雷达扫描花样的覆盖度（在 urdf/lidar_livox_mid360.xacro 里）
+#     Livox 插件每帧只消费 CSV 里连续的 <samples> 行，而 mid360.csv 的一个完整
+#     俯仰扫描花样是 20000 行。原来 samples=4000 → 每 5 帧就有 2 帧打在天空上、
+#     一个有效回波都没有（雷达实际只有 6 Hz，且点云只覆盖 1/5 的花样）。
+#     现在 samples=20000 / downsample=4 → 每帧 5000 条射线横扫整个花样，
+#     有效回波约 1150 点/帧、10Hz 稳定。**改之前 FAST-LIO 一直在刷
+#     "No Effective Points!"，EKF 实际上不做量测更新。**
+#
+#  2) 雷达量程系统性偏小 0.10 m（在 ros2_livox_simulation 插件里）
+#     插件把射线起点放在 minDist=0.10 m 处，却直接用"从射线起点算起"的长度当量程，
+#     于是所有点的距离都少了 0.10 m。实测：x=-5.475 的边墙（从 (-4.3,1.5) 看应为
+#     1.175 m）量到 1.075 m；y=5.475 的墙应为 3.975 m 量到 3.875 m；隔板应为
+#     1.475 m 量到 1.375 m —— 三处都恰好差 0.100 m。
+#     这种"整体向传感器收缩"的非刚性畸变会让扫描匹配产生与视点相关的系统偏差：
+#     实测表现为 roll/pitch 以 ~0.3°/s 缓慢漂移、z 单调上飘，最后匹配发散
+#     （APE 从 0.02 m 涨到几千 m）。修掉之后同一条路线 APE max = 0.02 m。
+#
+#  3) planar_move 的更新率（在 urdf/omni4_body.xacro 里，改为 1000 Hz）
+#     插件每 20 ms 才"设定一次"车体速度，两次之间物理引擎的地摩擦会把真实速度
+#     改掉，于是真实速度呈锯齿状（实测 ±0.25 m/s²、50Hz）。200 Hz 的 IMU 对它
+#     欠采样混叠成低频加速度偏置，EKF 会把它当成加速度计零偏估进去，姿态跟着漂。
+#     改成与物理步长一致的 1000 Hz 后，恒速行驶时 IMU 加速度为 (0, 0, 9.800)±1e-4。
+#  ============================================================================
+
+/**:
+    ros__parameters:
+        feature_extract_enable: false
+        # 每帧有效回波只有 ~1150 点，全部用上（原 2/3 会再砍一半）
+        point_filter_num: 1
+        max_iteration: 4
+        # 体素 0.1 m：场地尺度 11 m，0.2 太粗（墙只有 0.05 厚、围栏 0.08 高）
+        filter_size_surf: 0.05
+        filter_size_map: 0.05
+        cube_side_length: 1000.0
+        runtime_pos_log_enable: false
+        map_file_path: "./field_map.pcd"
+
+        common:
+            lid_topic:  "/livox/lidar"
+            imu_topic:  "/livox/imu"
+            time_sync_en: false
+            time_offset_lidar_to_imu: 0.0
+
+        preprocess:
+            lidar_type: 1                # 1 = Livox CustomMsg
+            scan_line: 4
+            blind: 0.5                   # 滤掉 0.5m 内的点（车体自身）
+            timestamp_unit: 3
+            scan_rate: 10
+
+        mapping:
+            acc_cov: 0.1
+            gyr_cov: 0.1
+            b_acc_cov: 0.0001
+            b_gyr_cov: 0.0001
+            fov_degree: 360.0
+            det_range: 100.0
+            extrinsic_est_en: false
+            extrinsic_T: [ 0.0, 0.0, 0.06 ]     # ← 本车：lidar 比 imu 高 6cm
+            extrinsic_R: [ 1., 0., 0.,
+                           0., 1., 0.,
+                           0., 0., 1. ]
+
+        publish:
+            path_en: true
+            effect_map_en: false
+            map_en: true                 # 发布 /Laser_map（累积 3D 地图）
+            scan_publish_en: true        # 发布 /cloud_registered（当前帧注册后点云）
+            dense_publish_en: false
+            scan_bodyframe_pub_en: true  # /cloud_registered_body
+
+        pcd_save:
+            pcd_save_en: false           # 跑完要存图请用 save_field_map3d.sh
+            interval: -1
